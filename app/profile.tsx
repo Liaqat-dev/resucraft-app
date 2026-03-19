@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,15 +11,16 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '@/context/AuthContext';
 import { getPersonalInfo, PersonalInfo } from '@/services/profileService';
-import { updateAccountInfo } from '@/services/authService';
+import { getProfileCompletion, ProfileCompletion, updateAccountInfo } from '@/services/authService';
 import { GOLD, useThemeColors } from '@/hooks/useThemeColors';
 
+import ProfileCompletionBar from '@/components/profile/ProfileCompletionBar';
 import PersonalInfoSection from '@/components/profile/PersonalInfoSection';
 import EducationSection from '@/components/profile/EducationSection';
 import ExperienceSection from '@/components/profile/ExperienceSection';
@@ -36,6 +37,15 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [personalInfo, setPersonalInfo] = useState<PersonalInfo | null>(ctxInfo ?? null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [completion, setCompletion] = useState<ProfileCompletion | null>(null);
+
+  // Re-fetch completion score every time this screen comes into focus
+  // so it stays up to date after editing any section.
+  useFocusEffect(
+    useCallback(() => {
+      getProfileCompletion().then(setCompletion).catch(() => {});
+    }, []),
+  );
 
   useEffect(() => {
     async function load() {
@@ -159,6 +169,9 @@ export default function ProfileScreen() {
             <Text className="font-bold text-lg mt-3" style={{ color: t.text }}>{displayName}</Text>
             <Text className="text-sm mt-0.5" style={{ color: t.textMuted }}>@{user?.username}</Text>
           </View>
+
+          {/* Completion bar */}
+          {completion && <ProfileCompletionBar data={completion} t={t} />}
 
           {/* Sections */}
           <PersonalInfoSection initialData={personalInfo} onSaved={handlePersonalInfoSaved} />

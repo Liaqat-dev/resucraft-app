@@ -228,6 +228,39 @@ export const revokeSession = async (sessionId: string): Promise<void> => {
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 
+// ─── Profile Completion ───────────────────────────────────────────────────────
+
+export interface ProfileCompletionSection {
+  id: string;
+  label: string;
+  weight: number;
+  isComplete: boolean;
+  isOptional: boolean;
+  hint: string;
+  earned: number;
+}
+
+export interface ProfileCompletion {
+  percentage: number;
+  isReady: boolean;
+  completedCount: number;
+  totalCount: number;
+  sections: ProfileCompletionSection[];
+}
+
+/**
+ * Get profile completion score with per-section breakdown.
+ * GET /auth/profile-completion
+ */
+export const getProfileCompletion = async (): Promise<ProfileCompletion> => {
+  try {
+    const response = await api.get<ProfileCompletion>('/auth/profile-completion');
+    return response.data;
+  } catch (error) {
+    throw new Error(extractMessage(error));
+  }
+};
+
 export interface SignupResponse {
   message: string;
   user: { _id: string; email: string; username: string };

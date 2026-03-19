@@ -18,7 +18,7 @@ import * as SecureStore from 'expo-secure-store';
 // Android emulator:  'http://10.0.2.2:5000/api'
 // iOS simulator:     'http://localhost:5000/api'
 // Physical device:   'http://192.168.100.6:5000/api'
-export const BASE_URL = 'http://192.168.100.6:5000/api';
+export const BASE_URL = 'http://192.168.0.111:5000/api';
 export const ACCESS_TOKEN_KEY = 'resucraft_access_token';
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
