@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
     height: BAR_HEIGHT,
     borderRadius: BAR_HEIGHT / 2,
     borderWidth: 1,
-    paddingHorizontal: 3,
+    paddingHorizontal: 0,
     marginBottom: 3,
     shadowOpacity: 0.14,
     shadowRadius: 22,

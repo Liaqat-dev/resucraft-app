@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Platform,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   listTemplates,
@@ -21,6 +23,9 @@ import {
   TEMPLATE_CATEGORIES,
   TemplateCategory,
 } from '@/services/templateService';
+import { generateResume } from '@/services/aiService';
+
+const GOLD = '#C09A3A';
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -278,9 +283,19 @@ interface CardProps {
   template: Template;
   isDark: boolean;
   onDelete: (id: string) => void;
+  isGenerateMode?: boolean;
+  onSelect?: (id: string) => void;
+  isGenerating?: boolean;
 }
 
-function TemplateCard({ template, isDark, onDelete }: CardProps) {
+function TemplateCard({
+  template,
+  isDark,
+  onDelete,
+  isGenerateMode,
+  onSelect,
+  isGenerating,
+}: CardProps) {
   const labelClr = isDark ? '#f0edf8' : '#111827';
   const subClr = isDark ? '#6b6885' : '#9ca3af';
 
@@ -309,8 +324,10 @@ function TemplateCard({ template, isDark, onDelete }: CardProps) {
         borderRadius: 14,
         overflow: 'hidden',
         backgroundColor: isDark ? '#141625' : '#ffffff',
-        borderWidth: 1,
-        borderColor: isDark ? '#232539' : '#e5e7eb',
+        borderWidth: isGenerateMode ? 2 : 1,
+        borderColor: isGenerateMode
+          ? (isDark ? GOLD + '60' : GOLD + '80')
+          : (isDark ? '#232539' : '#e5e7eb'),
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: isDark ? 0.3 : 0.08,
@@ -338,6 +355,25 @@ function TemplateCard({ template, isDark, onDelete }: CardProps) {
             {elements.length} items
           </Text>
         </View>
+
+        {/* Generating overlay */}
+        {isGenerating && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            <ActivityIndicator size="large" color={GOLD} />
+            <Text style={{ fontSize: 10, color: '#fff', fontWeight: '600' }}>
+              Generating…
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Info strip */}
@@ -350,38 +386,66 @@ function TemplateCard({ template, isDark, onDelete }: CardProps) {
         </Text>
         <Text style={{ fontSize: 10, color: subClr, marginBottom: 8 }}>{date}</Text>
 
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          <View
+        {isGenerateMode ? (
+          /* ── Generate mode: single "Select" button ── */
+          <TouchableOpacity
+            onPress={() => onSelect?.(template._id)}
+            disabled={isGenerating}
+            activeOpacity={0.75}
             style={{
-              flex: 1,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 4,
-              paddingVertical: 7,
-              backgroundColor: TINT + '18',
+              gap: 5,
+              paddingVertical: 8,
+              backgroundColor: isGenerating ? GOLD + '40' : GOLD,
               borderRadius: 8,
             }}
           >
-            <Ionicons name="open-outline" size={11} color={TINT} />
-            <Text style={{ fontSize: 10, fontWeight: '700', color: TINT }}>Open</Text>
-          </View>
-
-          <TouchableOpacity
-            onPress={handleDelete}
-            activeOpacity={0.7}
-            style={{
-              paddingVertical: 7,
-              paddingHorizontal: 11,
-              backgroundColor: '#fee2e2',
-              borderRadius: 8,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="trash-outline" size={12} color="#dc2626" />
+            {isGenerating ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="sparkles" size={12} color="#fff" />
+            )}
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>
+              {isGenerating ? 'Generating…' : 'Use This Template'}
+            </Text>
           </TouchableOpacity>
-        </View>
+        ) : (
+          /* ── Normal mode: Open + Delete ── */
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <View
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+                paddingVertical: 7,
+                backgroundColor: TINT + '18',
+                borderRadius: 8,
+              }}
+            >
+              <Ionicons name="open-outline" size={11} color={TINT} />
+              <Text style={{ fontSize: 10, fontWeight: '700', color: TINT }}>Open</Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={handleDelete}
+              activeOpacity={0.7}
+              style={{
+                paddingVertical: 7,
+                paddingHorizontal: 11,
+                backgroundColor: '#fee2e2',
+                borderRadius: 8,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="trash-outline" size={12} color="#dc2626" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -394,12 +458,20 @@ export default function TemplatesScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
+  // Generate mode params (from Home screen "Generate Resume" button)
+  const { jobDescription, mode } = useLocalSearchParams<{
+    jobDescription?: string;
+    mode?: string;
+  }>();
+  const isGenerateMode = mode === 'generate' && !!jobDescription;
+
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<TemplateCategory | 'All'>('All');
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   const bgColor = isDark ? '#0c0e1a' : '#f5f3ee';
   const labelColor = isDark ? '#e8e6f0' : '#1a1714';
@@ -431,6 +503,30 @@ export default function TemplatesScreen() {
       Alert.alert('Error', e.message ?? 'Failed to delete template');
     }
   }, []);
+
+  const handleSelect = useCallback(async (templateId: string) => {
+    if (!jobDescription) return;
+    setGeneratingId(templateId);
+    try {
+      await generateResume(templateId, jobDescription);
+      Alert.alert(
+        'Resume Generated!',
+        'Your AI-tailored resume has been created. Open the web builder to review and export it.',
+        [
+          {
+            text: 'Done',
+            onPress: () => {
+              setGeneratingId(null);
+              router.replace('/(tabs)');
+            },
+          },
+        ],
+      );
+    } catch (e: any) {
+      setGeneratingId(null);
+      Alert.alert('Generation Failed', e.message ?? 'Could not generate resume. Try again.');
+    }
+  }, [jobDescription]);
 
   const filtered = templates.filter((t) => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase());
@@ -487,12 +583,53 @@ export default function TemplatesScreen() {
   const Header = (
     <View style={{ paddingTop: topPad }}>
       <View style={{ paddingHorizontal: H_PAD, marginBottom: 16 }}>
+        {/* Back button in generate mode */}
+        {isGenerateMode && (
+          <TouchableOpacity
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 }}
+          >
+            <Ionicons name="arrow-back" size={16} color={subColor} />
+            <Text style={{ fontSize: 13, color: subColor }}>Back</Text>
+          </TouchableOpacity>
+        )}
+
         <Text style={{ fontSize: 32, fontWeight: '800', color: labelColor, letterSpacing: -0.5 }}>
-          Templates
+          {isGenerateMode ? 'Select Template' : 'Templates'}
         </Text>
         <Text style={{ fontSize: 14, color: subColor, marginTop: 2 }}>
-          {templates.length} resume template{templates.length !== 1 ? 's' : ''} saved
+          {isGenerateMode
+            ? 'Tap a template to generate your AI-tailored resume'
+            : `${templates.length} resume template${templates.length !== 1 ? 's' : ''} saved`}
         </Text>
+
+        {/* Generate mode: job description banner */}
+        {isGenerateMode && jobDescription && (
+          <View
+            style={{
+              marginTop: 12,
+              backgroundColor: isDark ? GOLD + '18' : GOLD + '15',
+              borderWidth: 1,
+              borderColor: GOLD + '50',
+              borderRadius: 12,
+              padding: 12,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 8,
+            }}
+          >
+            <Ionicons name="sparkles" size={15} color={GOLD} style={{ marginTop: 1 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: GOLD, marginBottom: 2 }}>
+                JOB DESCRIPTION
+              </Text>
+              <Text style={{ fontSize: 12, color: labelColor, lineHeight: 18 }} numberOfLines={3}>
+                {jobDescription}
+              </Text>
+            </View>
+          </View>
+        )}
 
         <View
           style={{
@@ -652,7 +789,14 @@ export default function TemplatesScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <TemplateCard template={item} isDark={isDark} onDelete={handleDelete} />
+          <TemplateCard
+            template={item}
+            isDark={isDark}
+            onDelete={handleDelete}
+            isGenerateMode={isGenerateMode}
+            onSelect={handleSelect}
+            isGenerating={generatingId === item._id}
+          />
         )}
       />
     </View>
