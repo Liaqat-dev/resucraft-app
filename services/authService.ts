@@ -68,6 +68,22 @@ const extractMessage = (error: unknown): string => {
 // ─── Auth service functions ───────────────────────────────────────────────────
 
 /**
+ * Sign in via Google OAuth.
+ * Accepts either a Google ID token (JWT) or access token — backend auto-detects.
+ */
+export const googleLogin = async (token: string): Promise<LoginResponse> => {
+  try {
+    const response = await api.post<LoginResponse>('/auth/google', {
+      accessToken: token,
+    });
+    await setStoredToken(response.data.accessToken);
+    return response.data;
+  } catch (error) {
+    throw new Error(extractMessage(error));
+  }
+};
+
+/**
  * Login with email/username + password.
  * Stores access token in SecureStore on success.
  */

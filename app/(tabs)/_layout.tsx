@@ -7,7 +7,7 @@ export default function TabLayout() {
   return (
     <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}
-      screenOptions={{ headerShown: false, sceneStyle: { paddingBottom: 41 } }}
+      screenOptions={{ headerShown: false, sceneStyle: { paddingBottom: 41 }, animation: 'shift' }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
       <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
