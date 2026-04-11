@@ -1,24 +1,32 @@
 /**
  * Axios instance with automatic JWT token refresh.
  *
- * ┌─────────────────────────────────────────────────────────┐
- * │  Change BASE_URL depending on where you're running:     │
- * │                                                         │
- * │  Android emulator  →  http://10.0.2.2:5000/api          │
- * │  iOS simulator     →  http://localhost:5000/api          │
- * │  Physical device   →  http://<YOUR_LAN_IP>:5000/api     │
- * │  (current LAN IP)  →  http://192.168.100.6:5000/api     │
- * └─────────────────────────────────────────────────────────┘
+ * BASE_URL is resolved automatically:
+ *  - Expo Go (physical device / simulator) → uses Metro bundler host IP
+ *  - Android emulator (bare)               → 10.0.2.2
+ *  - Fallback                              → localhost
  */
 
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 
-// ─── ⚙️  Set this to match your environment ───────────────────────────────────
-// Android emulator:  'http://10.0.2.2:5000/api'
-// iOS simulator:     'http://localhost:5000/api'
-// Physical device:   'http://192.168.100.6:5000/api'
-export const BASE_URL = 'http://192.168.0.111:5000/api';
+// ─── Auto-detect backend host ─────────────────────────────────────────────────
+function getBaseUrl(): string {
+  // Expo Go sets hostUri to "<ip>:8081" — reuse that IP for the backend
+  const hostUri = Constants.expoConfig?.hostUri ?? Constants.manifest2?.extra?.expoGo?.debuggerHost;
+  if (hostUri) {
+    const host = hostUri.split(':')[0];
+    return `http://${host}:5000/api`;
+  }
+  // Bare Android emulator
+  if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+    return 'http://10.0.2.2:5000/api';
+  }
+  return 'http://localhost:5000/api';
+}
+
+export const BASE_URL = getBaseUrl();
 export const ACCESS_TOKEN_KEY = 'resucraft_access_token';
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
