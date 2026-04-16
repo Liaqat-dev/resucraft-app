@@ -36,10 +36,10 @@ type TabDef = {
 
 const TABS: TabDef[] = [
   { label: 'Home',      icon: 'home-outline',          activeIcon: 'home'          },
-  { label: 'Explore',   icon: 'compass-outline',        activeIcon: 'compass'       },
-  { label: 'Templates', icon: 'layers-outline',         activeIcon: 'layers'        },
-  { label: 'Resumes',   icon: 'document-text-outline',  activeIcon: 'document-text' },
-  { label: 'Account',   icon: 'person-outline',         activeIcon: 'person'        },
+  { label: 'Templates', icon: 'layers-outline',         activeIcon: 'layers'         },
+  { label: 'Resumes',   icon: 'document-text-outline',  activeIcon: 'document-text'  },
+  { label: 'Profile',   icon: 'id-card-outline',        activeIcon: 'id-card'        },
+  { label: 'Account',   icon: 'person-outline',         activeIcon: 'person'         },
 ];
 
 // ─── single tab item ──────────────────────────────────────────────────────────

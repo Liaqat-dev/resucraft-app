@@ -60,14 +60,6 @@ export default function AccountScreen() {
 
     const MENU_ROWS: MenuRow[] = [
         {
-            icon: 'person-outline',
-            iconColor: GOLD,
-            iconBg: GOLD + '20',
-            label: 'Profile',
-            subtitle: 'Manage your personal information',
-            onPress: () => router.push('/profile'),
-        },
-        {
             icon: 'shield-checkmark-outline',
             iconColor: '#34d399',
             iconBg: '#34d39920',

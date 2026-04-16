@@ -29,6 +29,7 @@ export interface Template {
   name: string;
   category: TemplateCategory;
   data: TemplateData;
+  userId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +39,15 @@ export interface Template {
 export const listTemplates = async (): Promise<Template[]> => {
   try {
     const r = await api.get('/templates');
+    return r.data.templates ?? [];
+  } catch (e) {
+    throw new Error(msg(e));
+  }
+};
+
+export const listAllTemplates = async (): Promise<Template[]> => {
+  try {
+    const r = await api.get('/templates/all');
     return r.data.templates ?? [];
   } catch (e) {
     throw new Error(msg(e));

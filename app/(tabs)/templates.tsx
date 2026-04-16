@@ -3,7 +3,6 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
-  FlatList,
   Platform,
   RefreshControl,
   ScrollView,
@@ -18,11 +17,13 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   listTemplates,
+  listAllTemplates,
   deleteTemplate,
   Template,
   TEMPLATE_CATEGORIES,
   TemplateCategory,
 } from '@/services/templateService';
+import { useAuth } from '@/context/AuthContext';
 import { generateResume } from '@/services/aiService';
 
 const GOLD = '#C09A3A';
@@ -451,21 +452,52 @@ function TemplateCard({
   );
 }
 
+// ─── Two-column grid renderer ─────────────────────────────────────────────────
+
+function renderGrid(
+  items: Template[],
+  isDark: boolean,
+  onDelete: (id: string) => void,
+  isGenerateMode: boolean,
+  onSelect: (id: string) => void,
+  generatingId: string | null,
+) {
+  const rows: Template[][] = [];
+  for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2));
+  return rows.map((row, ri) => (
+    <View key={ri} style={{ flexDirection: 'row', gap: COL_GAP, paddingHorizontal: H_PAD, marginBottom: COL_GAP }}>
+      {row.map((item) => (
+        <TemplateCard
+          key={item._id}
+          template={item}
+          isDark={isDark}
+          onDelete={onDelete}
+          isGenerateMode={isGenerateMode}
+          onSelect={onSelect}
+          isGenerating={generatingId === item._id}
+        />
+      ))}
+      {row.length === 1 && <View style={{ width: COLUMN_W }} />}
+    </View>
+  ));
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function TemplatesScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { user } = useAuth();
 
-  // Generate mode params (from Home screen "Generate Resume" button)
   const { jobDescription, mode } = useLocalSearchParams<{
     jobDescription?: string;
     mode?: string;
   }>();
   const isGenerateMode = mode === 'generate' && !!jobDescription;
 
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [myTemplates, setMyTemplates] = useState<Template[]>([]);
+  const [communityTemplates, setCommunityTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -478,27 +510,34 @@ export default function TemplatesScreen() {
   const subColor = isDark ? '#5a5878' : '#a8a49e';
   const inputBg = isDark ? '#181b2a' : '#ffffff';
   const borderClr = isDark ? '#232539' : '#ede9e3';
+  const sectionLabelColor = isDark ? '#6b6885' : '#b0aca6';
+  const dividerColor = isDark ? '#1e2133' : '#eae6e0';
 
   const fetchTemplates = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      setTemplates(await listTemplates());
+      const [mine, all] = await Promise.all([listTemplates(), listAllTemplates()]);
+      setMyTemplates(mine);
+      const userId = user?._id;
+      setCommunityTemplates(
+        userId ? all.filter((t) => String(t.userId) !== String(userId)) : all,
+      );
     } catch (e: any) {
       setError(e.message ?? 'Failed to load templates');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [user?._id]);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
       await deleteTemplate(id);
-      setTemplates((prev) => prev.filter((t) => t._id !== id));
+      setMyTemplates((prev) => prev.filter((t) => t._id !== id));
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Failed to delete template');
     }
@@ -512,15 +551,7 @@ export default function TemplatesScreen() {
       Alert.alert(
         'Resume Generated!',
         'Your AI-tailored resume has been created. Open the web builder to review and export it.',
-        [
-          {
-            text: 'Done',
-            onPress: () => {
-              setGeneratingId(null);
-              router.replace('/(tabs)');
-            },
-          },
-        ],
+        [{ text: 'Done', onPress: () => { setGeneratingId(null); router.replace('/(tabs)'); } }],
       );
     } catch (e: any) {
       setGeneratingId(null);
@@ -528,16 +559,21 @@ export default function TemplatesScreen() {
     }
   }, [jobDescription]);
 
-  const filtered = templates.filter((t) => {
-    const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase());
-    const matchCat = activeCategory === 'All' || (t.category || 'Other') === activeCategory;
-    return matchSearch && matchCat;
-  });
+  const applyFilter = (list: Template[]) =>
+    list.filter((t) => {
+      const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase());
+      const matchCat = activeCategory === 'All' || (t.category || 'Other') === activeCategory;
+      return matchSearch && matchCat;
+    });
+
+  const filteredMine = applyFilter(myTemplates);
+  const filteredCommunity = applyFilter(communityTemplates);
+  const combined = [...myTemplates, ...communityTemplates];
 
   const countFor = (cat: TemplateCategory | 'All') =>
     cat === 'All'
-      ? templates.length
-      : templates.filter((t) => (t.category || 'Other') === cat).length;
+      ? combined.length
+      : combined.filter((t) => (t.category || 'Other') === cat).length;
 
   const topPad = insets.top + (Platform.OS === 'android' ? 16 : 8);
 
@@ -545,33 +581,13 @@ export default function TemplatesScreen() {
 
   if (!loading && error) {
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: bgColor,
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-          paddingHorizontal: H_PAD,
-        }}
-      >
-        <View
-          style={{
-            width: 72, height: 72, borderRadius: 36,
-            backgroundColor: isDark ? '#1e2130' : '#fee2e2',
-            alignItems: 'center', justifyContent: 'center',
-          }}
-        >
+      <View style={{ flex: 1, backgroundColor: bgColor, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: H_PAD }}>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: isDark ? '#1e2130' : '#fee2e2', alignItems: 'center', justifyContent: 'center' }}>
           <Ionicons name="cloud-offline-outline" size={32} color="#ef4444" />
         </View>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: labelColor, textAlign: 'center' }}>
-          Could not load templates
-        </Text>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: labelColor, textAlign: 'center' }}>Could not load templates</Text>
         <Text style={{ fontSize: 13, color: subColor, textAlign: 'center' }}>{error}</Text>
-        <TouchableOpacity
-          onPress={() => fetchTemplates()}
-          style={{ marginTop: 8, paddingHorizontal: 24, paddingVertical: 11, backgroundColor: TINT, borderRadius: 10 }}
-        >
+        <TouchableOpacity onPress={() => fetchTemplates()} style={{ marginTop: 8, paddingHorizontal: 24, paddingVertical: 11, backgroundColor: TINT, borderRadius: 10 }}>
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -583,76 +599,35 @@ export default function TemplatesScreen() {
   const Header = (
     <View style={{ paddingTop: topPad }}>
       <View style={{ paddingHorizontal: H_PAD, marginBottom: 16 }}>
-        {/* Back button in generate mode */}
         {isGenerateMode && (
-          <TouchableOpacity
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 }}
-          >
+          <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 }}>
             <Ionicons name="arrow-back" size={16} color={subColor} />
             <Text style={{ fontSize: 13, color: subColor }}>Back</Text>
           </TouchableOpacity>
         )}
-
         <Text style={{ fontSize: 32, fontWeight: '800', color: labelColor, letterSpacing: -0.5 }}>
           {isGenerateMode ? 'Select Template' : 'Templates'}
         </Text>
         <Text style={{ fontSize: 14, color: subColor, marginTop: 2 }}>
           {isGenerateMode
             ? 'Tap a template to generate your AI-tailored resume'
-            : `${templates.length} resume template${templates.length !== 1 ? 's' : ''} saved`}
+            : `${myTemplates.length} of yours · ${communityTemplates.length} from community`}
         </Text>
 
-        {/* Generate mode: job description banner */}
         {isGenerateMode && jobDescription && (
-          <View
-            style={{
-              marginTop: 12,
-              backgroundColor: isDark ? GOLD + '18' : GOLD + '15',
-              borderWidth: 1,
-              borderColor: GOLD + '50',
-              borderRadius: 12,
-              padding: 12,
-              flexDirection: 'row',
-              alignItems: 'flex-start',
-              gap: 8,
-            }}
-          >
+          <View style={{ marginTop: 12, backgroundColor: isDark ? GOLD + '18' : GOLD + '15', borderWidth: 1, borderColor: GOLD + '50', borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
             <Ionicons name="sparkles" size={15} color={GOLD} style={{ marginTop: 1 }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: GOLD, marginBottom: 2 }}>
-                JOB DESCRIPTION
-              </Text>
-              <Text style={{ fontSize: 12, color: labelColor, lineHeight: 18 }} numberOfLines={3}>
-                {jobDescription}
-              </Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: GOLD, marginBottom: 2 }}>JOB DESCRIPTION</Text>
+              <Text style={{ fontSize: 12, color: labelColor, lineHeight: 18 }} numberOfLines={3}>{jobDescription}</Text>
             </View>
           </View>
         )}
 
-        <View
-          style={{
-            marginTop: 14,
-            flexDirection: 'row', alignItems: 'center',
-            backgroundColor: inputBg,
-            borderRadius: 14, paddingHorizontal: 12, paddingVertical: 11,
-            borderWidth: 1, borderColor: borderClr,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 1 },
-            shadowOpacity: isDark ? 0.25 : 0.05,
-            shadowRadius: 6, elevation: 2,
-            gap: 8,
-          }}
-        >
+        <View style={{ marginTop: 14, flexDirection: 'row', alignItems: 'center', backgroundColor: inputBg, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: borderClr, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: isDark ? 0.25 : 0.05, shadowRadius: 6, elevation: 2, gap: 8 }}>
           <Ionicons name="search-outline" size={16} color={subColor} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search templates…"
-            placeholderTextColor={subColor}
-            style={{ flex: 1, fontSize: 14, color: labelColor }}
-          />
+          <TextInput value={search} onChangeText={setSearch} placeholder="Search templates…" placeholderTextColor={subColor} style={{ flex: 1, fontSize: 14, color: labelColor }} />
           {search.length > 0 && (
             <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.7}>
               <Ionicons name="close-circle" size={16} color={subColor} />
@@ -661,63 +636,25 @@ export default function TemplatesScreen() {
         </View>
       </View>
 
-      {/* Category filter chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+      {/* Category chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: H_PAD, gap: 7, paddingBottom: 2 }}
-        style={{ marginBottom: 14 }}
-      >
+        style={{ marginBottom: 14 }}>
         {(['All', ...TEMPLATE_CATEGORIES] as (TemplateCategory | 'All')[]).map((cat) => {
           const count = countFor(cat);
           if (count === 0 && cat !== 'All') return null;
           const active = activeCategory === cat;
           return (
-            <TouchableOpacity
-              key={cat}
-              onPress={() => setActiveCategory(cat)}
-              activeOpacity={0.72}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 5,
-                paddingHorizontal: 12, paddingVertical: 6,
-                borderRadius: 20,
-                backgroundColor: active ? TINT : 'transparent',
-                borderWidth: 1.5,
-                borderColor: active ? TINT : (isDark ? '#232539' : '#e0ddd8'),
-              }}
-            >
-              <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : subColor }}>
-                {cat}
-              </Text>
-              <View style={{
-                minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3,
-                alignItems: 'center', justifyContent: 'center',
-                backgroundColor: active ? 'rgba(255,255,255,0.25)' : (isDark ? '#232539' : '#e8e4de'),
-              }}>
-                <Text style={{ fontSize: 9, fontWeight: '700', color: active ? '#fff' : subColor }}>
-                  {count}
-                </Text>
+            <TouchableOpacity key={cat} onPress={() => setActiveCategory(cat)} activeOpacity={0.72}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: active ? TINT : 'transparent', borderWidth: 1.5, borderColor: active ? TINT : (isDark ? '#232539' : '#e0ddd8') }}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : subColor }}>{cat}</Text>
+              <View style={{ minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? 'rgba(255,255,255,0.25)' : (isDark ? '#232539' : '#e8e4de') }}>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: active ? '#fff' : subColor }}>{count}</Text>
               </View>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
-
-      <View
-        style={{
-          paddingHorizontal: H_PAD, marginBottom: 12,
-          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        }}
-      >
-        <Text style={{ fontSize: 10, color: TINT, fontWeight: '700', letterSpacing: 1.3, textTransform: 'uppercase' }}>
-          ✦ {activeCategory === 'All' ? 'All Templates' : activeCategory}
-        </Text>
-        {(search.length > 0 || activeCategory !== 'All') && (
-          <Text style={{ fontSize: 12, color: subColor }}>
-            {filtered.length} result{filtered.length !== 1 ? 's' : ''}
-          </Text>
-        )}
-      </View>
     </View>
   );
 
@@ -735,70 +672,72 @@ export default function TemplatesScreen() {
     );
   }
 
-  // ── List ─────────────────────────────────────────────────────────────────
+  // ── Empty state helper ───────────────────────────────────────────────────
+
+  const EmptySection = ({ label }: { label: string }) => (
+    <View style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: H_PAD }}>
+      <Ionicons name="document-text-outline" size={26} color={sectionLabelColor} />
+      <Text style={{ fontSize: 12, color: sectionLabelColor, marginTop: 6, textAlign: 'center' }}>{label}</Text>
+    </View>
+  );
+
+  // ── Section label ────────────────────────────────────────────────────────
+
+  const SectionRow = ({ title, count }: { title: string; count: number }) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: H_PAD, marginBottom: 10, gap: 8 }}>
+      <Text style={{ fontSize: 10, color: TINT, fontWeight: '700', letterSpacing: 1.3, textTransform: 'uppercase' }}>
+        ✦ {title}
+      </Text>
+      <View style={{ height: 1, flex: 1, backgroundColor: dividerColor }} />
+      <Text style={{ fontSize: 10, color: sectionLabelColor, fontWeight: '600' }}>{count}</Text>
+    </View>
+  );
+
+  // ── Main render ──────────────────────────────────────────────────────────
 
   return (
     <View style={{ flex: 1, backgroundColor: bgColor }}>
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item._id}
-        numColumns={2}
-        columnWrapperStyle={{ gap: COL_GAP, paddingHorizontal: H_PAD, marginBottom: COL_GAP }}
-        ListHeaderComponent={Header}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+      <ScrollView
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => fetchTemplates(true)}
-            tintColor={TINT}
-          />
-        }
-        ListEmptyComponent={
-          <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: H_PAD }}>
-            <View
-              style={{
-                width: 72, height: 72, borderRadius: 36,
-                backgroundColor: isDark ? '#181b2a' : '#f0eee9',
-                alignItems: 'center', justifyContent: 'center',
-                marginBottom: 12,
-              }}
-            >
-              <Ionicons
-                name={search ? 'search-outline' : 'document-text-outline'}
-                size={30}
-                color={subColor}
-              />
-            </View>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: labelColor }}>
-              {templates.length === 0 ? 'No templates yet' : 'No templates found'}
-            </Text>
-            <Text style={{ fontSize: 13, color: subColor, marginTop: 4, textAlign: 'center' }}>
-              {templates.length === 0
-                ? 'Create templates in the web builder — they will appear here'
-                : search
-                ? `No results for "${search}"`
-                : `No templates in "${activeCategory}"`}
-            </Text>
-            {templates.length > 0 && (search.length > 0 || activeCategory !== 'All') && (
-              <TouchableOpacity onPress={() => { setSearch(''); setActiveCategory('All'); }} style={{ marginTop: 12 }}>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: TINT }}>Clear filters</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        }
-        renderItem={({ item }) => (
-          <TemplateCard
-            template={item}
-            isDark={isDark}
-            onDelete={handleDelete}
-            isGenerateMode={isGenerateMode}
-            onSelect={handleSelect}
-            isGenerating={generatingId === item._id}
-          />
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchTemplates(true)} tintColor={TINT} />}
+      >
+        {Header}
+
+        {/* ── My Templates ── */}
+        <SectionRow title="My Templates" count={filteredMine.length} />
+        {filteredMine.length === 0 ? (
+          <EmptySection label={
+            search || activeCategory !== 'All'
+              ? 'No matches in your templates'
+              : 'Create templates in the web builder — they will appear here'
+          } />
+        ) : (
+          renderGrid(filteredMine, isDark, handleDelete, isGenerateMode, handleSelect, generatingId)
         )}
-      />
+
+        {/* ── Divider ── */}
+        <View style={{ height: 1, backgroundColor: dividerColor, marginHorizontal: H_PAD, marginVertical: 18 }} />
+
+        {/* ── All Templates (community) ── */}
+        <SectionRow title="All Templates" count={filteredCommunity.length} />
+        {filteredCommunity.length === 0 ? (
+          <EmptySection label={
+            search || activeCategory !== 'All'
+              ? 'No matches in community templates'
+              : 'No community templates available yet'
+          } />
+        ) : (
+          renderGrid(filteredCommunity, isDark, handleDelete, isGenerateMode, handleSelect, generatingId)
+        )}
+
+        {/* Clear filters link */}
+        {(search.length > 0 || activeCategory !== 'All') && filteredMine.length === 0 && filteredCommunity.length === 0 && (
+          <TouchableOpacity onPress={() => { setSearch(''); setActiveCategory('All'); }} style={{ alignItems: 'center', marginTop: 8 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: TINT }}>Clear filters</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
     </View>
   );
 }
