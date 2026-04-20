@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
+  Animated,
   Platform,
   Pressable,
   StyleSheet,
@@ -8,11 +9,6 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -64,19 +60,20 @@ function TabItem({
   muted,
   onPress,
 }: TabItemProps) {
-  const width = useSharedValue(isFocused ? activeWidth : INACTIVE_W);
+  const width = useRef(new Animated.Value(isFocused ? activeWidth : INACTIVE_W)).current;
 
   useEffect(() => {
-    width.value = withSpring(
-      isFocused ? activeWidth : INACTIVE_W,
-      WIDTH_SPRING,
-    );
+    Animated.spring(width, {
+      toValue: isFocused ? activeWidth : INACTIVE_W,
+      damping: WIDTH_SPRING.damping,
+      stiffness: WIDTH_SPRING.stiffness,
+      mass: WIDTH_SPRING.mass,
+      useNativeDriver: false,
+    }).start();
   }, [isFocused, activeWidth]);
 
-  const outerStyle = useAnimatedStyle(() => ({ width: width.value }));
-
   return (
-    <Animated.View style={[styles.tabOuter, outerStyle]}>
+    <Animated.View style={[styles.tabOuter, { width }]}>
       <Pressable
         onPress={onPress}
         android_ripple={{ color: 'transparent' }}

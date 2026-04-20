@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   ActivityIndicator,
+  Alert,
   Dimensions,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
+  StatusBar,
   Text,
   TextInput,
   TouchableOpacity,
@@ -15,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import Previewer from '@/components/Previewer';
 import {
   listTemplates,
   listAllTemplates,
@@ -38,17 +41,14 @@ const COLUMN_W = (SCREEN_W - H_PAD * 2 - COL_GAP) / 2;
 const PREVIEW_H = COLUMN_W * (297 / 210); // A4 ratio
 
 // A4 canvas at 96 dpi
-const CANVAS_W = (210 * 96) / 25.4; // ≈ 794 px
-const CANVAS_H = (297 * 96) / 25.4; // ≈ 1122 px
+const CANVAS_W = (210 * 96) / 25.4;
+const CANVAS_H = (297 * 96) / 25.4;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Strip HTML tags from content (rich-text editors can produce HTML strings)
 const stripHtml = (s: string) =>
   typeof s === 'string' ? s.replace(/<[^>]*>/g, '') : '';
 
-// Flatten nested template data → absolute canvas coordinates
-// (mirrors the web TemplateCard.tsx nestedToFlat logic)
 function nestedToFlat(data: any): { elements: any[]; sections: any[] } {
   const elements: any[] = [...(data?.elements ?? [])];
   const sections: any[] = [];
@@ -56,20 +56,14 @@ function nestedToFlat(data: any): { elements: any[]; sections: any[] } {
   for (const sec of data?.sections ?? []) {
     const { 'sub-sections': subs, elements: secEls, direction, ...rest } = sec;
     sections.push(rest);
-
     for (const el of secEls ?? []) {
       elements.push({ ...el, x: el.x + sec.x, y: el.y + sec.y });
     }
-
     for (const sub of subs ?? []) {
       const { elements: subEls, direction: _d, ...subRest } = sub;
       sections.push({ ...subRest, x: subRest.x + sec.x, y: subRest.y + sec.y });
       for (const el of subEls ?? []) {
-        elements.push({
-          ...el,
-          x: el.x + subRest.x + sec.x,
-          y: el.y + subRest.y + sec.y,
-        });
+        elements.push({ ...el, x: el.x + subRest.x + sec.x, y: el.y + subRest.y + sec.y });
       }
     }
   }
@@ -77,63 +71,165 @@ function nestedToFlat(data: any): { elements: any[]; sections: any[] } {
   return { elements, sections };
 }
 
-// ─── Mini Document Preview ────────────────────────────────────────────────────
-//
-// Renders the actual resume layout at full canvas size, then visually scales
-// it down to fit the card using a CSS-like transform — same idea as Canva
-// thumbnails.
-//
-// Why position offset?  RN's `scale` transform pivots around the element's
-// center.  To make it anchor at the top-left we shift the canvas so that its
-// center lands at (COLUMN_W/2, PREVIEW_H/2) before scaling.
-//   left = canvasW*(scale−1)/2  (negative, pulls canvas left)
-//   top  = canvasH*(scale−1)/2  (negative, pulls canvas up)
-//
+// ─── Full-screen Preview Modal ────────────────────────────────────────────────
+
+interface PreviewModalProps {
+  template: Template | null;
+  isDark: boolean;
+  isOwn: boolean;
+  insets: ReturnType<typeof useSafeAreaInsets>;
+  onClose: () => void;
+  onDelete: (id: string) => void;
+}
+
+function PreviewModal({ template, isDark, isOwn, insets, onClose, onDelete }: PreviewModalProps) {
+  const overlayBg = isDark ? '#0c0e1a' : '#f5f3ee';
+  const headerBg = isDark ? '#141625' : '#ffffff';
+  const borderClr = isDark ? '#232539' : '#e5e7eb';
+  const labelClr = isDark ? '#f0edf8' : '#111827';
+  const subClr = isDark ? '#6b6885' : '#9ca3af';
+
+  const previewW = SCREEN_W - H_PAD * 2;
+
+  const date = template
+    ? new Date(template.updatedAt).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      })
+    : '';
+
+  const handleDelete = () => {
+    if (!template) return;
+    Alert.alert(
+      'Delete Template',
+      `Delete "${template.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => { onDelete(template._id); onClose(); },
+        },
+      ],
+    );
+  };
+
+  return (
+    <Modal
+      visible={!!template}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={headerBg}
+      />
+      <View style={{ flex: 1, backgroundColor: overlayBg }}>
+
+        {/* ── Header bar ── */}
+        <View
+          style={{
+            paddingTop: insets.top + (Platform.OS === 'android' ? 12 : 6),
+            paddingBottom: 12,
+            paddingHorizontal: H_PAD,
+            backgroundColor: headerBg,
+            borderBottomWidth: 1,
+            borderBottomColor: borderClr,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          {/* Close */}
+          <TouchableOpacity
+            onPress={onClose}
+            activeOpacity={0.7}
+            style={{
+              width: 36, height: 36, borderRadius: 18,
+              backgroundColor: isDark ? '#1e2133' : '#f0ede8',
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="close" size={20} color={labelClr} />
+          </TouchableOpacity>
+
+          {/* Title */}
+          <View style={{ flex: 1 }}>
+            <Text
+              style={{ fontSize: 16, fontWeight: '700', color: labelClr, letterSpacing: -0.2 }}
+              numberOfLines={1}
+            >
+              {template?.name}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 }}>
+              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: TINT + '20' }}>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: TINT, letterSpacing: 0.4 }}>
+                  {template?.category}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 11, color: subClr }}>{date}</Text>
+            </View>
+          </View>
+
+          {/* Delete — only for owned templates */}
+          {isOwn && (
+            <TouchableOpacity
+              onPress={handleDelete}
+              activeOpacity={0.7}
+              style={{
+                width: 36, height: 36, borderRadius: 18,
+                backgroundColor: isDark ? '#1a0a0a' : '#fff1f1',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="trash-outline" size={18} color="#ef4444" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* ── Scrollable preview ── */}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: H_PAD,
+            paddingTop: 20,
+            paddingBottom: insets.bottom + 32,
+            alignItems: 'center',
+          }}
+          bounces
+        >
+          {template && (
+            <Previewer data={template.data} width={previewW} />
+          )}
+        </ScrollView>
+
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Mini Document Preview (card thumbnail) ───────────────────────────────────
+
 function MiniDocPreview({ data }: { data: any }) {
   const hasContent = data?.sections?.length || data?.elements?.length;
 
   if (!hasContent) {
     return (
-      <View
-        style={{
-          width: COLUMN_W,
-          height: PREVIEW_H,
-          backgroundColor: '#f3f4f6',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
+      <View style={{ width: COLUMN_W, height: PREVIEW_H, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
         <Ionicons name="document-text-outline" size={28} color="#9ca3af" />
         <Text style={{ fontSize: 9, color: '#9ca3af', marginTop: 4 }}>No preview</Text>
       </View>
     );
   }
 
-  const cw = data.canvasSettings?.width
-    ? parseFloat(data.canvasSettings.width) * 96 / 25.4
-    : CANVAS_W;
-  const ch = data.canvasSettings?.height
-    ? parseFloat(data.canvasSettings.height) * 96 / 25.4
-    : CANVAS_H;
-
+  const cw = data.canvasSettings?.width ? parseFloat(data.canvasSettings.width) * 96 / 25.4 : CANVAS_W;
+  const ch = data.canvasSettings?.height ? parseFloat(data.canvasSettings.height) * 96 / 25.4 : CANVAS_H;
   const scale = COLUMN_W / cw;
   const docBg = data.canvasSettings?.background ?? '#ffffff';
-
   const { elements, sections } = nestedToFlat(data);
 
   return (
-    <View
-      style={{
-        width: COLUMN_W,
-        height: PREVIEW_H,
-        overflow: 'hidden',
-        backgroundColor: docBg,
-      }}
-    >
-      {/*
-        Full-size canvas anchored at top-left via transform.
-        See offset formula in the component comment above.
-      */}
+    <View style={{ width: COLUMN_W, height: PREVIEW_H, overflow: 'hidden', backgroundColor: docBg }}>
       <View
         style={{
           position: 'absolute',
@@ -146,86 +242,27 @@ function MiniDocPreview({ data }: { data: any }) {
         }}
         pointerEvents="none"
       >
-        {/* ── Section backgrounds ── */}
         {sections.map((sec, i) =>
           sec.backgroundColor ? (
-            <View
-              key={sec.id ?? `s${i}`}
-              style={{
-                position: 'absolute',
-                left: sec.x,
-                top: sec.y,
-                width: sec.width,
-                height: sec.height,
-                backgroundColor: sec.backgroundColor,
-                borderWidth: sec.borderColor ? 1 : 0,
-                borderColor: sec.borderColor ?? 'transparent',
-              }}
-            />
+            <View key={sec.id ?? `s${i}`} style={{ position: 'absolute', left: sec.x, top: sec.y, width: sec.width, height: sec.height, backgroundColor: sec.backgroundColor, borderWidth: sec.borderColor ? 1 : 0, borderColor: sec.borderColor ?? 'transparent' }} />
           ) : null,
         )}
-
-        {/* ── Section titles (rendered as real text) ── */}
         {sections.map((sec, i) =>
           sec.title && sec.headerVisible !== false ? (
-            <Text
-              key={`sh${sec.id ?? i}`}
-              numberOfLines={1}
-              style={{
-                position: 'absolute',
-                left: sec.x + 4,
-                top: sec.y + 2,
-                width: sec.width - 8,
-                fontSize: sec.headerFontSize ?? 18,
-                fontWeight: (sec.headerFontWeight ?? '700') as any,
-                color: sec.headerColor ?? '#1f2937',
-                lineHeight: (sec.headerLineHeight ?? 1.2) * (sec.headerFontSize ?? 18),
-              }}
-            >
+            <Text key={`sh${sec.id ?? i}`} numberOfLines={1} style={{ position: 'absolute', left: sec.x + 4, top: sec.y + 2, width: sec.width - 8, fontSize: sec.headerFontSize ?? 18, fontWeight: (sec.headerFontWeight ?? '700') as any, color: sec.headerColor ?? '#1f2937', lineHeight: (sec.headerLineHeight ?? 1.2) * (sec.headerFontSize ?? 18) }}>
               {sec.title}
             </Text>
           ) : null,
         )}
-
-        {/* ── Elements ── */}
         {elements.map((el, i) => {
           if (el.type === 'line-break') {
             const lw = el.width * ((el.lineBreakWidthPercent ?? 100) / 100);
             const lh = el.lineBreakThickness ?? 1;
-            return (
-              <View
-                key={el.id ?? `e${i}`}
-                style={{
-                  position: 'absolute',
-                  left: el.x + (el.width - lw) / 2,
-                  top: el.y + (el.height - lh) / 2,
-                  width: lw,
-                  height: lh,
-                  backgroundColor: el.lineBreakColor ?? '#d1d5db',
-                }}
-              />
-            );
+            return <View key={el.id ?? `e${i}`} style={{ position: 'absolute', left: el.x + (el.width - lw) / 2, top: el.y + (el.height - lh) / 2, width: lw, height: lh, backgroundColor: el.lineBreakColor ?? '#d1d5db' }} />;
           }
-
           const fontSize = el.fontSize ?? 14;
           return (
-            <Text
-              key={el.id ?? `e${i}`}
-              numberOfLines={0}
-              style={{
-                position: 'absolute',
-                left: el.x,
-                top: el.y,
-                width: el.width,
-                height: el.height,
-                fontSize,
-                fontWeight: (el.fontWeight ?? 'normal') as any,
-                color: el.color ?? '#000000',
-                textAlign: (el.textAlign ?? 'left') as any,
-                lineHeight: (el.lineHeight ?? 1.5) * fontSize,
-                overflow: 'hidden',
-              }}
-            >
+            <Text key={el.id ?? `e${i}`} numberOfLines={0} style={{ position: 'absolute', left: el.x, top: el.y, width: el.width, height: el.height, fontSize, fontWeight: (el.fontWeight ?? 'normal') as any, color: el.color ?? '#000000', textAlign: (el.textAlign ?? 'left') as any, lineHeight: (el.lineHeight ?? 1.5) * fontSize, overflow: 'hidden' }}>
               {stripHtml(el.content ?? '')}
             </Text>
           );
@@ -235,7 +272,7 @@ function MiniDocPreview({ data }: { data: any }) {
   );
 }
 
-// ─── Skeleton Card ─────────────────────────────────────────────────────────────
+// ─── Skeleton Card ────────────────────────────────────────────────────────────
 
 function SkeletonCard({ isDark }: { isDark: boolean }) {
   const shimmer = isDark ? '#282c3d' : '#e0ddd8';
@@ -243,30 +280,10 @@ function SkeletonCard({ isDark }: { isDark: boolean }) {
   const previewBg = isDark ? '#1a1e30' : '#f0ede8';
 
   return (
-    <View
-      style={{
-        width: COLUMN_W,
-        borderRadius: 14,
-        overflow: 'hidden',
-        backgroundColor: bg,
-        borderWidth: 1,
-        borderColor: isDark ? '#232539' : '#e5e7eb',
-      }}
-    >
+    <View style={{ width: COLUMN_W, borderRadius: 14, overflow: 'hidden', backgroundColor: bg, borderWidth: 1, borderColor: isDark ? '#232539' : '#e5e7eb' }}>
       <View style={{ width: COLUMN_W, height: PREVIEW_H, backgroundColor: previewBg }}>
         {[0.08, 0.18, 0.30, 0.42, 0.54, 0.66, 0.76].map((pct, i) => (
-          <View
-            key={i}
-            style={{
-              position: 'absolute',
-              top: PREVIEW_H * pct,
-              left: 10,
-              width: `${[68, 50, 72, 42, 60, 48, 55][i]}%`,
-              height: 3,
-              borderRadius: 2,
-              backgroundColor: shimmer,
-            }}
-          />
+          <View key={i} style={{ position: 'absolute', top: PREVIEW_H * pct, left: 10, width: `${[68, 50, 72, 42, 60, 48, 55][i]}%`, height: 3, borderRadius: 2, backgroundColor: shimmer }} />
         ))}
       </View>
       <View style={{ padding: 10, gap: 7 }}>
@@ -278,11 +295,13 @@ function SkeletonCard({ isDark }: { isDark: boolean }) {
   );
 }
 
-// ─── Template Card ─────────────────────────────────────────────────────────────
+// ─── Template Card ────────────────────────────────────────────────────────────
 
 interface CardProps {
   template: Template;
   isDark: boolean;
+  isOwn: boolean;
+  onPreview: (template: Template) => void;
   onDelete: (id: string) => void;
   isGenerateMode?: boolean;
   onSelect?: (id: string) => void;
@@ -292,6 +311,8 @@ interface CardProps {
 function TemplateCard({
   template,
   isDark,
+  isOwn,
+  onPreview,
   onDelete,
   isGenerateMode,
   onSelect,
@@ -302,9 +323,7 @@ function TemplateCard({
 
   const { elements } = nestedToFlat(template.data ?? {});
   const date = new Date(template.updatedAt).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+    month: 'short', day: 'numeric', year: 'numeric',
   });
 
   const handleDelete = () => {
@@ -336,116 +355,91 @@ function TemplateCard({
         elevation: 3,
       }}
     >
-      {/* Live preview thumbnail */}
-      <View style={{ overflow: 'hidden' }}>
+      {/* Tappable thumbnail */}
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => isGenerateMode ? onSelect?.(template._id) : onPreview(template)}
+        disabled={isGenerating}
+        style={{ overflow: 'hidden' }}
+      >
         <MiniDocPreview data={template.data} />
 
         {/* Item count badge */}
-        <View
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            backgroundColor: 'rgba(0,0,0,0.50)',
-            borderRadius: 20,
-            paddingHorizontal: 7,
-            paddingVertical: 3,
-          }}
-        >
+        <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.50)', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 3 }}>
           <Text style={{ color: '#fff', fontSize: 8, fontWeight: '700', letterSpacing: 0.4 }}>
             {elements.length} items
           </Text>
         </View>
 
-        {/* Generating overlay */}
-        {isGenerating && (
-          <View
-            style={{
-              position: 'absolute',
-              top: 0, left: 0, right: 0, bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            <ActivityIndicator size="large" color={GOLD} />
-            <Text style={{ fontSize: 10, color: '#fff', fontWeight: '600' }}>
-              Generating…
-            </Text>
+        {/* Expand hint (normal mode only) */}
+        {!isGenerateMode && (
+          <View style={{ position: 'absolute', bottom: 8, right: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="expand-outline" size={12} color="#fff" />
           </View>
         )}
-      </View>
+
+        {/* Generating overlay */}
+        {isGenerating && (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <ActivityIndicator size="large" color={GOLD} />
+            <Text style={{ fontSize: 10, color: '#fff', fontWeight: '600' }}>Generating…</Text>
+          </View>
+        )}
+      </TouchableOpacity>
 
       {/* Info strip */}
       <View style={{ padding: 10 }}>
-        <Text
-          style={{ fontSize: 12, fontWeight: '700', color: labelClr, marginBottom: 2 }}
-          numberOfLines={1}
-        >
+        <Text style={{ fontSize: 12, fontWeight: '700', color: labelClr, marginBottom: 2 }} numberOfLines={1}>
           {template.name}
         </Text>
         <Text style={{ fontSize: 10, color: subClr, marginBottom: 8 }}>{date}</Text>
 
         {isGenerateMode ? (
-          /* ── Generate mode: single "Select" button ── */
+          /* ── Generate mode: "Use This Template" ── */
           <TouchableOpacity
             onPress={() => onSelect?.(template._id)}
             disabled={isGenerating}
             activeOpacity={0.75}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 5,
-              paddingVertical: 8,
-              backgroundColor: isGenerating ? GOLD + '40' : GOLD,
-              borderRadius: 8,
-            }}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8, backgroundColor: isGenerating ? GOLD + '40' : GOLD, borderRadius: 8 }}
           >
-            {isGenerating ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name="sparkles" size={12} color="#fff" />
-            )}
+            {isGenerating
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Ionicons name="sparkles" size={12} color="#fff" />
+            }
             <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>
               {isGenerating ? 'Generating…' : 'Use This Template'}
             </Text>
           </TouchableOpacity>
-        ) : (
-          /* ── Normal mode: Open + Delete ── */
+        ) : isOwn ? (
+          /* ── My template: Preview + Delete ── */
           <View style={{ flexDirection: 'row', gap: 6 }}>
-            <View
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 4,
-                paddingVertical: 7,
-                backgroundColor: TINT + '18',
-                borderRadius: 8,
-              }}
+            <TouchableOpacity
+              onPress={() => onPreview(template)}
+              activeOpacity={0.75}
+              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, backgroundColor: TINT + '18', borderRadius: 8 }}
             >
               <Ionicons name="open-outline" size={11} color={TINT} />
               <Text style={{ fontSize: 10, fontWeight: '700', color: TINT }}>Open</Text>
-            </View>
+            </TouchableOpacity>
 
             <TouchableOpacity
               onPress={handleDelete}
               activeOpacity={0.7}
-              style={{
-                paddingVertical: 7,
-                paddingHorizontal: 11,
-                backgroundColor: '#fee2e2',
-                borderRadius: 8,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
+              style={{ paddingVertical: 7, paddingHorizontal: 11, backgroundColor: '#fee2e2', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}
             >
               <Ionicons name="trash-outline" size={12} color="#dc2626" />
             </TouchableOpacity>
           </View>
+        ) : (
+          /* ── Community template: Preview only ── */
+          <TouchableOpacity
+            onPress={() => onPreview(template)}
+            activeOpacity={0.75}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, backgroundColor: TINT + '18', borderRadius: 8 }}
+          >
+            <Ionicons name="eye-outline" size={11} color={TINT} />
+            <Text style={{ fontSize: 10, fontWeight: '700', color: TINT }}>Preview</Text>
+          </TouchableOpacity>
         )}
       </View>
     </View>
@@ -457,6 +451,8 @@ function TemplateCard({
 function renderGrid(
   items: Template[],
   isDark: boolean,
+  isOwn: boolean,
+  onPreview: (t: Template) => void,
   onDelete: (id: string) => void,
   isGenerateMode: boolean,
   onSelect: (id: string) => void,
@@ -471,6 +467,8 @@ function renderGrid(
           key={item._id}
           template={item}
           isDark={isDark}
+          isOwn={isOwn}
+          onPreview={onPreview}
           onDelete={onDelete}
           isGenerateMode={isGenerateMode}
           onSelect={onSelect}
@@ -504,6 +502,8 @@ export default function TemplatesScreen() {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<TemplateCategory | 'All'>('All');
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
+  const [previewIsOwn, setPreviewIsOwn] = useState(false);
 
   const bgColor = isDark ? '#0c0e1a' : '#f5f3ee';
   const labelColor = isDark ? '#e8e6f0' : '#1a1714';
@@ -559,6 +559,11 @@ export default function TemplatesScreen() {
     }
   }, [jobDescription]);
 
+  const openPreview = useCallback((template: Template, isOwn: boolean) => {
+    setPreviewTemplate(template);
+    setPreviewIsOwn(isOwn);
+  }, []);
+
   const applyFilter = (list: Template[]) =>
     list.filter((t) => {
       const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase());
@@ -577,7 +582,7 @@ export default function TemplatesScreen() {
 
   const topPad = insets.top + (Platform.OS === 'android' ? 16 : 8);
 
-  // ── Error ────────────────────────────────────────────────────────────────
+  // ── Error ─────────────────────────────────────────────────────────────────
 
   if (!loading && error) {
     return (
@@ -587,14 +592,14 @@ export default function TemplatesScreen() {
         </View>
         <Text style={{ fontSize: 16, fontWeight: '700', color: labelColor, textAlign: 'center' }}>Could not load templates</Text>
         <Text style={{ fontSize: 13, color: subColor, textAlign: 'center' }}>{error}</Text>
-        <TouchableOpacity onPress={() => fetchTemplates()} style={{ marginTop: 8, paddingHorizontal: 24, paddingVertical: 11, backgroundColor: TINT, borderRadius: 10 }}>
+        <TouchableOpacity onPress={() => { void fetchTemplates(); }} style={{ marginTop: 8, paddingHorizontal: 24, paddingVertical: 11, backgroundColor: TINT, borderRadius: 10 }}>
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // ── Header ───────────────────────────────────────────────────────────────
+  // ── Header ────────────────────────────────────────────────────────────────
 
   const Header = (
     <View style={{ paddingTop: topPad }}>
@@ -658,7 +663,7 @@ export default function TemplatesScreen() {
     </View>
   );
 
-  // ── Loading skeletons ────────────────────────────────────────────────────
+  // ── Loading skeletons ─────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -672,16 +677,7 @@ export default function TemplatesScreen() {
     );
   }
 
-  // ── Empty state helper ───────────────────────────────────────────────────
-
-  const EmptySection = ({ label }: { label: string }) => (
-    <View style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: H_PAD }}>
-      <Ionicons name="document-text-outline" size={26} color={sectionLabelColor} />
-      <Text style={{ fontSize: 12, color: sectionLabelColor, marginTop: 6, textAlign: 'center' }}>{label}</Text>
-    </View>
-  );
-
-  // ── Section label ────────────────────────────────────────────────────────
+  // ── Section label ─────────────────────────────────────────────────────────
 
   const SectionRow = ({ title, count }: { title: string; count: number }) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: H_PAD, marginBottom: 10, gap: 8 }}>
@@ -693,18 +689,47 @@ export default function TemplatesScreen() {
     </View>
   );
 
-  // ── Main render ──────────────────────────────────────────────────────────
+  // ── Empty section ─────────────────────────────────────────────────────────
+
+  const EmptySection = ({ label }: { label: string }) => (
+    <View style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: H_PAD }}>
+      <Ionicons name="document-text-outline" size={26} color={sectionLabelColor} />
+      <Text style={{ fontSize: 12, color: sectionLabelColor, marginTop: 6, textAlign: 'center' }}>{label}</Text>
+    </View>
+  );
+
+  // ── Main render ───────────────────────────────────────────────────────────
 
   return (
     <View style={{ flex: 1, backgroundColor: bgColor }}>
+
+      {/* Full-screen preview modal */}
+      <PreviewModal
+        template={previewTemplate}
+        isDark={isDark}
+        isOwn={previewIsOwn}
+        insets={insets}
+        onClose={() => setPreviewTemplate(null)}
+        onDelete={(id) => {
+          void handleDelete(id);
+          setPreviewTemplate(null);
+        }}
+      />
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchTemplates(true)} tintColor={TINT} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { void fetchTemplates(true); }}
+            tintColor={TINT}
+          />
+        }
       >
         {Header}
 
-        {/* ── My Templates ── */}
+        {/* ── 1. My Templates ── */}
         <SectionRow title="My Templates" count={filteredMine.length} />
         {filteredMine.length === 0 ? (
           <EmptySection label={
@@ -713,13 +738,18 @@ export default function TemplatesScreen() {
               : 'Create templates in the web builder — they will appear here'
           } />
         ) : (
-          renderGrid(filteredMine, isDark, handleDelete, isGenerateMode, handleSelect, generatingId)
+          renderGrid(
+            filteredMine, isDark, true,
+            (t) => openPreview(t, true),
+            handleDelete,
+            isGenerateMode, handleSelect, generatingId,
+          )
         )}
 
         {/* ── Divider ── */}
         <View style={{ height: 1, backgroundColor: dividerColor, marginHorizontal: H_PAD, marginVertical: 18 }} />
 
-        {/* ── All Templates (community) ── */}
+        {/* ── 2. All Templates (community) ── */}
         <SectionRow title="All Templates" count={filteredCommunity.length} />
         {filteredCommunity.length === 0 ? (
           <EmptySection label={
@@ -728,10 +758,15 @@ export default function TemplatesScreen() {
               : 'No community templates available yet'
           } />
         ) : (
-          renderGrid(filteredCommunity, isDark, handleDelete, isGenerateMode, handleSelect, generatingId)
+          renderGrid(
+            filteredCommunity, isDark, false,
+            (t) => openPreview(t, false),
+            handleDelete,
+            isGenerateMode, handleSelect, generatingId,
+          )
         )}
 
-        {/* Clear filters link */}
+        {/* Clear filters */}
         {(search.length > 0 || activeCategory !== 'All') && filteredMine.length === 0 && filteredCommunity.length === 0 && (
           <TouchableOpacity onPress={() => { setSearch(''); setActiveCategory('All'); }} style={{ alignItems: 'center', marginTop: 8 }}>
             <Text style={{ fontSize: 12, fontWeight: '600', color: TINT }}>Clear filters</Text>

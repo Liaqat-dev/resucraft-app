@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,15 +15,11 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Yup from 'yup';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
 
 import { useAuth } from '@/context/AuthContext';
-import { login, googleLogin, getProfile } from '@/services/authService';
+import { login, getProfile } from '@/services/authService';
 import { getPersonalInfo } from '@/services/profileService';
 import { useAppFormik } from '@/hooks/useAppFormik';
-
-WebBrowser.maybeCompleteAuthSession();
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD        = '#C09A3A';
@@ -68,43 +64,7 @@ export default function LoginScreen() {
   const { loginSuccess, updatePersonalInfoState } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState('');
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [googleError, setGoogleError] = useState('');
   const passwordRef = useRef<TextInput>(null);
-
-  const [request, googleResponse, promptAsync] = Google.useAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-  });
-
-  useEffect(() => {
-    if (googleResponse?.type === 'success') {
-      const token =
-        googleResponse.authentication?.idToken ??
-        googleResponse.authentication?.accessToken;
-      if (token) handleGoogleLogin(token);
-    } else if (googleResponse?.type === 'error') {
-      setGoogleError('Google sign-in failed. Please try again.');
-    }
-  }, [googleResponse]);
-
-  const handleGoogleLogin = async (token: string) => {
-    setGoogleLoading(true);
-    setGoogleError('');
-    try {
-      const data = await googleLogin(token);
-      const user = await getProfile();
-      loginSuccess(user);
-      try { const info = await getPersonalInfo(); updatePersonalInfoState(info); } catch {}
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)');
-    } catch (e: any) {
-      setGoogleError(e.message || 'Google sign-in failed.');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
 
   const form = useAppFormik({
     initialValues: { emailOrUsername: '', password: '' },
@@ -262,54 +222,6 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
           </View>
-
-          {/* Divider */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 16, gap: 10 }}>
-            <View style={{ flex: 1, height: 1, backgroundColor: BORDER }} />
-            <Text style={{ color: TEXT_DIM, fontSize: 11, letterSpacing: 0.5 }}>or continue with</Text>
-            <View style={{ flex: 1, height: 1, backgroundColor: BORDER }} />
-          </View>
-
-          {/* Google error */}
-          {googleError ? (
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#f8717112', borderWidth: 1, borderColor: '#f8717130', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 }}>
-              <Ionicons name="alert-circle" size={15} color="#f87171" style={{ marginTop: 1 }} />
-              <Text style={{ color: '#f87171', fontSize: 12, flex: 1 }}>{googleError}</Text>
-            </View>
-          ) : null}
-
-          {/* Google sign-in button */}
-          <TouchableOpacity
-            onPress={() => {
-              setGoogleError('');
-              if (Platform.OS === 'android' && !process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID) {
-                setGoogleError('Android Google sign-in is not configured yet. Add EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID to your .env file.');
-                return;
-              }
-              promptAsync();
-            }}
-            activeOpacity={0.85}
-            disabled={!request || googleLoading}
-            style={{
-              height: 44, borderRadius: 100, borderWidth: 1,
-              borderColor: BORDER_MED, backgroundColor: CARD,
-              alignItems: 'center', justifyContent: 'center',
-              flexDirection: 'row', gap: 10, marginBottom: 20,
-              opacity: (!request || googleLoading) ? 0.5 : 1,
-            }}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color={GOLD} size="small" />
-            ) : (
-              <>
-                {/* Google "G" SVG-like icon using text */}
-                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#4285F4' }}>G</Text>
-                </View>
-                <Text style={{ color: TEXT, fontSize: 14, fontWeight: '600' }}>Continue with Google</Text>
-              </>
-            )}
-          </TouchableOpacity>
 
           {/* Footer */}
           <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>

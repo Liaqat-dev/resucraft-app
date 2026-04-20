@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useInterviewSession, SessionStatus, FeedbackData } from '@/hooks/useInterviewSession';
 import { useThemeColors, GOLD } from '@/hooks/useThemeColors';
+import { getPersonalInfo } from '@/services/profileService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -245,17 +246,38 @@ export default function InterviewScreen() {
     feedback,
     error,
     isMicActive,
+    isMuted,
+    toggleMute,
     startSession,
     endInterview,
     closeSession,
   } = useInterviewSession();
 
-  // Auto-start when screen mounts
+  // Fetch profile then auto-start when screen mounts
   useEffect(() => {
-    if (jobDescription) {
-      startSession(jobDescription);
-    }
+    if (!jobDescription) return;
+    let cancelled = false;
+
+    const buildProfile = async (): Promise<string> => {
+      try {
+        const info = await getPersonalInfo();
+        const parts: string[] = [];
+        const name = [info.firstName, info.lastName].filter(Boolean).join(' ');
+        if (name)          parts.push(`Name: ${name}`);
+        if (info.profession) parts.push(`Profession: ${info.profession}`);
+        if (info.bio)        parts.push(`Bio: ${info.bio}`);
+        return parts.join('\n');
+      } catch {
+        return '';
+      }
+    };
+
+    buildProfile().then((profile) => {
+      if (!cancelled) startSession(jobDescription, profile);
+    });
+
     return () => {
+      cancelled = true;
       closeSession();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -271,10 +293,11 @@ export default function InterviewScreen() {
     router.back();
   };
 
-  const isActive = status === 'interviewing' || status === 'ready';
-  const isConnecting = status === 'connecting' || status === 'ready';
-  const label = statusLabel(status, isMicActive);
-  const topPad = insets.top + (Platform.OS === 'android' ? 8 : 0);
+  const isActive     = status === 'interviewing' || status === 'ready';
+  const isConnecting = status === 'connecting'   || status === 'ready';
+  const label        = statusLabel(status, isMicActive);
+  const topPad       = insets.top + (Platform.OS === 'android' ? 8 : 0);
+  const showMuteBtn  = status === 'interviewing' && isMicActive;
 
   // ── Feedback view ────────────────────────────────────────────────────────
 
@@ -335,6 +358,37 @@ export default function InterviewScreen() {
           <Ionicons name="close" size={18} color={t.textSub} />
         </TouchableOpacity>
       </View>
+
+      {/* Muted banner */}
+      {isMuted && status === 'interviewing' && (
+        <View
+          style={{
+            margin: 12,
+            marginBottom: 0,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#fef2f2',
+            borderWidth: 1,
+            borderColor: '#fecaca',
+            borderRadius: 10,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="mic-off" size={15} color="#dc2626" />
+            <Text style={{ fontSize: 13, color: '#dc2626', fontWeight: '500' }}>
+              Muted — interviewer cannot hear you
+            </Text>
+          </View>
+          <TouchableOpacity onPress={toggleMute} activeOpacity={0.7}>
+            <Text style={{ fontSize: 12, color: '#dc2626', fontWeight: '700', textDecorationLine: 'underline' }}>
+              Unmute
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Error banner */}
       {error && (
@@ -486,22 +540,51 @@ export default function InterviewScreen() {
           borderTopColor: t.border,
         }}
       >
-        {/* Mic indicator */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Ionicons
-            name={isMicActive ? 'mic' : 'mic-off'}
-            size={16}
-            color={isMicActive ? '#22c55e' : t.iconMuted}
-          />
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: isMicActive ? '600' : '400',
-              color: isMicActive ? '#16a34a' : t.textMuted,
-            }}
-          >
-            {isMicActive ? 'Mic active' : 'Mic off'}
-          </Text>
+        {/* Mic indicator + mute toggle */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Ionicons
+              name={isMuted ? 'mic-off' : isMicActive ? 'mic' : 'mic-off'}
+              size={16}
+              color={isMuted ? '#dc2626' : isMicActive ? '#22c55e' : t.iconMuted}
+            />
+            <Text
+              style={{
+                fontSize: 12,
+                fontWeight: '600',
+                color: isMuted ? '#dc2626' : isMicActive ? '#16a34a' : t.textMuted,
+              }}
+            >
+              {isMuted ? 'Muted' : isMicActive ? 'Mic active' : 'Mic off'}
+            </Text>
+          </View>
+
+          {showMuteBtn && (
+            <TouchableOpacity
+              onPress={toggleMute}
+              activeOpacity={0.75}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                backgroundColor: isMuted ? '#fef2f2' : t.card,
+                borderWidth: 1,
+                borderColor: isMuted ? '#fecaca' : t.border,
+                borderRadius: 8,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+              }}
+            >
+              <Ionicons
+                name={isMuted ? 'mic' : 'mic-off'}
+                size={13}
+                color={isMuted ? '#dc2626' : t.textSub}
+              />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: isMuted ? '#dc2626' : t.textSub }}>
+                {isMuted ? 'Unmute' : 'Mute'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Action buttons */}

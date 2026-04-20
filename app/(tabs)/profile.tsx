@@ -13,8 +13,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-
 import { useAuth } from '@/context/AuthContext';
 import { getPersonalInfo, PersonalInfo } from '@/services/profileService';
 import { getProfileCompletion, ProfileCompletion, updateAccountInfo } from '@/services/authService';
@@ -66,13 +64,14 @@ export default function ProfileTabScreen() {
   };
 
   const handlePickAvatar = async () => {
+    const ImagePicker = await import('expo-image-picker');
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission required', 'Please allow access to your photo library.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true, aspect: [1, 1], quality: 0.8,
     });
     if (result.canceled || !result.assets[0]) return;
@@ -161,3 +160,4 @@ export default function ProfileTabScreen() {
     </KeyboardAvoidingView>
   );
 }
+

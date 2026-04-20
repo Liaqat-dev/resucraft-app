@@ -9,24 +9,8 @@
 
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
 
-// ─── Auto-detect backend host ─────────────────────────────────────────────────
-function getBaseUrl(): string {
-  // Expo Go sets hostUri to "<ip>:8081" — reuse that IP for the backend
-  const hostUri = Constants.expoConfig?.hostUri ?? Constants.manifest2?.extra?.expoGo?.debuggerHost;
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5000/api`;
-  }
-  // Bare Android emulator
-  if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
-    return 'http://10.0.2.2:5000/api';
-  }
-  return 'http://localhost:5000/api';
-}
-
-export const BASE_URL = getBaseUrl();
+export const BASE_URL = 'https://resucraft-server.onrender.com/api';
 export const ACCESS_TOKEN_KEY = 'resucraft_access_token';
 
 // ─── Token helpers ────────────────────────────────────────────────────────────

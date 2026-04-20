@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/LIAQAT/Desktop/FYP/resucraft/server/**)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d[k] for k in ['main','module','exports','source'] if k in d}, indent=2\\)\\)\")",
+      "Bash(node -e \"require\\('@react-native-google-signin/google-signin'\\)\")",
+      "Bash(npm uninstall:*)",
+      "Bash(npm install:*)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('main','?'\\), d.get\\('version','?'\\)\\)\")",
+      "Bash(adb logcat:*)",
+      "Bash(adb shell:*)"
+    ]
+  }
+}

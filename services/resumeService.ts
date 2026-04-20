@@ -1,5 +1,5 @@
 /**
- * Resume service — CRUD for education, experience, skills, projects, certificates.
+ * Resume service — CRUD for generated resumes, education, experience, skills, projects, certificates.
  */
 
 import { AxiosError } from 'axios';
@@ -258,6 +258,40 @@ export const updateCertificate = async (
 export const deleteCertificate = async (id: string): Promise<void> => {
   try {
     await api.delete(`/certificates/${id}`);
+  } catch (e) {
+    throw new Error(msg(e));
+  }
+};
+
+// ─── Generated Resumes ────────────────────────────────────────────────────────
+
+export type ResumeCategory = 'Modern' | 'Classic' | 'Creative' | 'Minimal' | 'Professional' | 'Other';
+
+export interface GeneratedResume {
+  _id: string;
+  name: string;
+  category: ResumeCategory;
+  data: {
+    elements?: any[];
+    sections?: any[];
+    canvasSettings?: { width?: string; height?: string; background?: string };
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listGeneratedResumes = async (): Promise<GeneratedResume[]> => {
+  try {
+    const r = await api.get('/resumes');
+    return r.data.resumes ?? [];
+  } catch (e) {
+    throw new Error(msg(e));
+  }
+};
+
+export const deleteGeneratedResume = async (id: string): Promise<void> => {
+  try {
+    await api.delete(`/resumes/${id}`);
   } catch (e) {
     throw new Error(msg(e));
   }

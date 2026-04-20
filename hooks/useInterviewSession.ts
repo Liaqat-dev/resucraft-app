@@ -108,9 +108,11 @@ export function useInterviewSession() {
   const [feedback, setFeedback] = useState<FeedbackData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isMicActive, setIsMicActive] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const isMicActiveRef = useRef(false);
+  const isMutedRef = useRef(false);
   const recordingRef = useRef<any>(null);
   const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -241,6 +243,15 @@ export function useInterviewSession() {
     setIsMicActive(false);
   }, []);
 
+  // ── Mute toggle ─────────────────────────────────────────────────────────────
+  // The recording loop keeps running when muted — we just skip sending audio.
+  // This means there's no gap or permission re-prompt when the user unmutes.
+  const toggleMute = useCallback(() => {
+    const next = !isMutedRef.current;
+    isMutedRef.current = next;
+    setIsMuted(next);
+  }, []);
+
   const startMicrophoneChunks = useCallback(async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -300,12 +311,14 @@ export function useInterviewSession() {
               // iOS records linear PCM with a WAV header — strip it so we
               // send raw Int16 PCM.  Android records AAC/M4A — send as-is;
               // the server will transcode it to PCM before Gemini sees it.
-              const isWav = data.startsWith('UklGR'); // base64 of 'RIFF'
-              const payload = isWav ? stripWavHeader(data) : data;
-              const mimeType = Platform.OS === 'android'
-                ? 'audio/mp4'
-                : 'audio/pcm;rate=16000';
-              wsRef.current.send(JSON.stringify({ type: 'audio_chunk', data: payload, mimeType }));
+              if (!isMutedRef.current) {
+                const isWav = data.startsWith('UklGR'); // base64 of 'RIFF'
+                const payload = isWav ? stripWavHeader(data) : data;
+                const mimeType = Platform.OS === 'android'
+                  ? 'audio/mp4'
+                  : 'audio/pcm;rate=16000';
+                wsRef.current.send(JSON.stringify({ type: 'audio_chunk', data: payload, mimeType }));
+              }
               await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
             }
           } catch {
@@ -326,7 +339,7 @@ export function useInterviewSession() {
   // ── Session lifecycle ───────────────────────────────────────────────────────
 
   const startSession = useCallback(
-    async (jobDescription: string) => {
+    async (jobDescription: string, candidateProfile?: string) => {
       setStatus('connecting');
       setTranscript([]);
       setFeedback(null);
@@ -350,7 +363,12 @@ export function useInterviewSession() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'start_session', jobDescription, token }));
+        ws.send(JSON.stringify({
+          type: 'start_session',
+          jobDescription,
+          candidateProfile: candidateProfile ?? '',
+          token,
+        }));
       };
 
       ws.onmessage = (event) => {
@@ -417,17 +435,18 @@ export function useInterviewSession() {
     await stopMicrophone();
     wsRef.current?.close();
     wsRef.current = null;
-    // Stop any playing sound and clear the queue.
     audioQueueRef.current = [];
     isPlayingRef.current = false;
     if (currentSoundRef.current) {
       currentSoundRef.current.unloadAsync().catch(() => {});
       currentSoundRef.current = null;
     }
+    isMutedRef.current = false;
     setStatus('idle');
     setTranscript([]);
     setFeedback(null);
     setError(null);
+    setIsMuted(false);
   }, [stopMicrophone]);
 
   return {
@@ -436,6 +455,8 @@ export function useInterviewSession() {
     feedback,
     error,
     isMicActive,
+    isMuted,
+    toggleMute,
     startSession,
     endInterview,
     closeSession,
